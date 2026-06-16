@@ -7,5 +7,6 @@ dist
 prisma/dev.db
 *.db
 dev-server*.log
+tsconfig.tsbuildinfo
 public/uploads/*
 !public/uploads/.gitkeep
