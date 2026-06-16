@@ -15,24 +15,28 @@ export type PostWithRelations = Prisma.PostGetPayload<{
   include: typeof postInclude;
 }>;
 
+export function getPublicPostWhere(now: Date = new Date()): Prisma.PostWhereInput {
+  return {
+    visibility: "PUBLIC",
+    OR: [
+      { status: "PUBLISHED" },
+      {
+        status: "SCHEDULED",
+        scheduledAt: {
+          lte: now
+        }
+      }
+    ]
+  };
+}
+
 export async function getPublicPosts(query?: string) {
   const now = new Date();
 
   return prisma.post.findMany({
     where: {
-      visibility: "PUBLIC",
       AND: [
-        {
-          OR: [
-            { status: "PUBLISHED" },
-            {
-              status: "SCHEDULED",
-              scheduledAt: {
-                lte: now
-              }
-            }
-          ]
-        },
+        getPublicPostWhere(now),
         ...(query
           ? [
               {
@@ -70,24 +74,20 @@ export async function getAllPosts(query?: string) {
 }
 
 export async function getPublicPostBySlug(slug: string) {
-  const post = await prisma.post.findUnique({
-    where: { slug },
+  return prisma.post.findFirst({
+    where: {
+      slug,
+      ...getPublicPostWhere()
+    },
     include: postInclude
   });
+}
 
-  if (!post || post.visibility !== "PUBLIC") {
-    return null;
-  }
-
-  if (post.status === "PUBLISHED") {
-    return post;
-  }
-
-  if (post.status === "SCHEDULED" && post.scheduledAt && post.scheduledAt <= new Date()) {
-    return post;
-  }
-
-  return null;
+export async function getPostForEditor(id: string) {
+  return prisma.post.findUnique({
+    where: { id },
+    include: postInclude
+  });
 }
 
 export async function uniqueSlug(base: string, currentPostId?: string) {

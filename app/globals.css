@@ -537,28 +537,36 @@ ul[data-type="taskList"] li[data-checked="true"] > div { color: #8a8275; text-de
 }
 
 /* ---- 이미지 NodeView(에디터) 리사이즈 핸들 ---- */
-.image-node-frame {
-  position: relative;
-  display: inline-block;
-  line-height: 0;
-}
-.image-node-frame img { border-radius: 8px; }
-.image-node-frame.is-selected { outline: 2px solid #7fa86b; outline-offset: 2px; border-radius: 8px; }
+.image-node img { border-radius: 8px; }
+.image-node.is-selected { outline: 2px solid #7fa86b; outline-offset: 2px; border-radius: 8px; }
 .image-resize-handle {
   position: absolute;
-  right: -5px;
   bottom: -5px;
   width: 14px;
   height: 14px;
   border-radius: 50%;
   background: #7fa86b;
   border: 2px solid #fff;
-  cursor: nwse-resize;
   opacity: 0;
   transition: opacity 0.12s ease;
 }
-.image-node-frame.is-selected .image-resize-handle,
-.image-node-frame:hover .image-resize-handle { opacity: 1; }
+.image-resize-handle.is-right { right: -5px; cursor: nwse-resize; }
+.image-resize-handle.is-left { left: -5px; cursor: nesw-resize; }
+.image-node.is-selected .image-resize-handle,
+.image-node:hover .image-resize-handle { opacity: 1; }
+.image-size-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 6;
+  border-radius: 5px;
+  background: rgba(31, 41, 51, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  pointer-events: none;
+}
 .image-node .image-caption {
   display: block;
   margin-top: 0.4rem;

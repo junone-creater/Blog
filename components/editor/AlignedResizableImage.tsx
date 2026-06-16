@@ -4,9 +4,10 @@
 // 기존 PostEditor 의 인라인 AlignedImage 를 대체한다.
 //
 // 핵심 제약: 저장되는 renderHTML 출력 구조는 기존과 동일해야 한다.
-//   figure.image-figure[data-align][style=margin] > img[data-align][data-caption]( + figcaption.image-caption)
-// 읽기 페이지(Lightbox)가 이 구조에 의존하므로 절대 바꾸지 않는다.
-// 편집 화면에서만 ReactNodeView 로 드래그 핸들을 띄우고, width 속성만 새로 추가한다.
+//   figure.image-figure[data-align][style] > img[data-align][data-caption]( + figcaption.image-caption)
+// 읽기 페이지(Lightbox)가 이 구조에 의존하므로 바꾸지 않는다.
+// 너비(width)만 새 속성으로 추가하며, figure 가 너비를 갖고 img 는 항상 100% 로 채운다
+// (px·% 어느 쪽이든 한 곳에서만 너비를 정해 이중 적용 버그를 막는다).
 
 import Image from "@tiptap/extension-image";
 import { mergeAttributes } from "@tiptap/core";
@@ -18,7 +19,7 @@ function marginFor(align: string) {
   return align === "center" ? "1rem auto" : align === "right" ? "1rem 0 1rem auto" : "1rem auto 1rem 0";
 }
 
-// 편집 화면 전용 NodeView: 이미지 + 우하단 드래그 핸들 + 캡션 미리보기
+// 편집 화면 전용 NodeView: 이미지 + 드래그 핸들 + 드래그 중 크기 배지 + 캡션 미리보기
 function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
   const { src, alt, caption, textAlign, width } = node.attrs as {
     src: string;
@@ -29,7 +30,7 @@ function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
   };
   const align = textAlign === "center" || textAlign === "right" ? textAlign : "left";
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState(false);
+  const [dragLabel, setDragLabel] = useState<string | null>(null);
 
   function onResizeStart(event: React.PointerEvent) {
     event.preventDefault();
@@ -37,18 +38,22 @@ function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
     const startX = event.clientX;
     const img = wrapperRef.current?.querySelector("img");
     const startWidth = img?.getBoundingClientRect().width ?? 0;
-    const containerWidth = wrapperRef.current?.parentElement?.getBoundingClientRect().width ?? startWidth;
-    setDragging(true);
+    // 컨테이너(본문 폭) 기준 최대값
+    const containerWidth =
+      wrapperRef.current?.parentElement?.getBoundingClientRect().width ?? startWidth;
+    // 오른쪽 정렬이면 핸들을 왼쪽 아래에 두므로 드래그 방향을 반대로 해석
+    const dir = align === "right" ? -1 : 1;
 
     function onMove(moveEvent: PointerEvent) {
-      const delta = moveEvent.clientX - startX;
-      // 우하단 핸들: 오른쪽으로 끌면 커짐. 최소 80px, 최대 컨테이너 너비.
+      const delta = (moveEvent.clientX - startX) * dir;
       const next = Math.max(80, Math.min(startWidth + delta, containerWidth));
-      updateAttributes({ width: `${Math.round(next)}px` });
+      const px = `${Math.round(next)}px`;
+      setDragLabel(`${Math.round((next / containerWidth) * 100)}% · ${px}`);
+      updateAttributes({ width: px });
     }
 
     function onUp() {
-      setDragging(false);
+      setDragLabel(null);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     }
@@ -59,25 +64,27 @@ function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
 
   return (
     <NodeViewWrapper
-      className="image-node"
-      style={{ display: "table", margin: marginFor(align), maxWidth: "100%" }}
+      ref={wrapperRef}
+      className={`image-node${selected ? " is-selected" : ""}`}
+      style={{ display: "table", position: "relative", margin: marginFor(align), width: width ?? undefined, maxWidth: "100%" }}
       data-align={align}
     >
-      <div
-        ref={wrapperRef}
-        className={`image-node-frame${selected ? " is-selected" : ""}${dragging ? " is-dragging" : ""}`}
-        style={{ width: width ?? "auto", maxWidth: "100%" }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt ?? ""} draggable={false} style={{ width: "100%", display: "block" }} />
-        {/* 우하단 드래그 핸들 (선택 시 노출) */}
-        <span
-          className="image-resize-handle"
-          onPointerDown={onResizeStart}
-          contentEditable={false}
-          aria-hidden="true"
-        />
-      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt ?? ""}
+        draggable={false}
+        // 너비 지정 시에만 100%로 채우고, 원본일 땐 auto로 본래 크기를 유지한다
+        style={{ width: width ? "100%" : "auto", maxWidth: "100%", display: "block" }}
+      />
+      {dragLabel && <span className="image-size-badge">{dragLabel}</span>}
+      {/* 정렬에 따라 핸들 위치를 바꿔 잘림을 줄인다 */}
+      <span
+        className={`image-resize-handle ${align === "right" ? "is-left" : "is-right"}`}
+        onPointerDown={onResizeStart}
+        contentEditable={false}
+        aria-hidden="true"
+      />
       {caption ? <figcaption className="image-caption">{caption}</figcaption> : null}
     </NodeViewWrapper>
   );
@@ -103,12 +110,16 @@ export const AlignedResizableImage = Image.extend({
       },
       width: {
         default: null,
-        // img 의 width(px/%) 또는 인라인 style 의 width 에서 복원
+        // figure 또는 img 의 width 속성/스타일에서 복원 (px 또는 %)
         parseHTML: (element) => {
+          const figure = element.closest("figure");
+          const figureWidth = figure?.style?.width;
+          if (figureWidth) return figureWidth;
           const attr = element.getAttribute("width");
           if (attr) return /^\d+$/.test(attr) ? `${attr}px` : attr;
           const styleWidth = (element as HTMLElement).style?.width;
-          return styleWidth || null;
+          // img 의 width:100% 는 figure 폭을 채우는 값이므로 실제 너비로 보지 않는다
+          return styleWidth && styleWidth !== "100%" ? styleWidth : null;
         },
         renderHTML: () => ({})
       }
@@ -130,9 +141,17 @@ export const AlignedResizableImage = Image.extend({
     delete imgAttrs.caption;
     delete imgAttrs.width;
 
-    const imgStyle = width ? `width:${width};max-width:100%;` : "max-width:100%;";
-    const img = ["img", mergeAttributes(imgAttrs, { "data-align": align, "data-caption": caption, style: imgStyle })];
-    // figure 너비를 이미지에 맞춰 캡션이 이미지 폭을 따르도록 width 를 figure 에도 반영
+    // 너비는 figure 가 갖고, 지정 시에만 img 가 figure 를 100% 채운다 (px·% 모두 일관).
+    // 원본(width 없음)이면 img 는 본래 크기를 유지해 figure 가 그에 맞춰진다.
+    const imgStyle = width ? "width:100%;max-width:100%;display:block;" : "max-width:100%;display:block;";
+    const img = [
+      "img",
+      mergeAttributes(imgAttrs, {
+        "data-align": align,
+        "data-caption": caption,
+        style: imgStyle
+      })
+    ];
     const figureWidth = width ? `width:${width};` : "";
     const figureAttrs = {
       "data-align": align,

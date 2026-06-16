@@ -53,9 +53,6 @@ import Youtube from "@tiptap/extension-youtube";
 import CharacterCount from "@tiptap/extension-character-count";
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
-import { marked } from "marked";
-import TurndownService from "turndown";
-import { gfm } from "turndown-plugin-gfm";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clsx } from "clsx";
@@ -69,6 +66,8 @@ import { checklistExtensions } from "@/components/editor/checklist";
 import TagInput from "@/components/editor/TagInput";
 import CategorySelect from "@/components/editor/CategorySelect";
 import CharCountField from "@/components/editor/CharCountField";
+import { Field, Panel, Select } from "@/components/editor/EditorFields";
+import { htmlToMarkdown, markdownToHtml } from "@/components/editor/sourceMode";
 import { buildExcerpt } from "@/lib/excerpt";
 import { PostWithRelations } from "@/lib/posts";
 import { slugify } from "@/lib/slug";
@@ -112,7 +111,7 @@ type FormState = {
   status: PostStatus;
   visibility: Visibility;
   categoryName: string;
-  tagNames: string;
+  tagNames: string[];
   seoTitle: string;
   seoDescription: string;
   scheduledAt: string;
@@ -124,21 +123,6 @@ function toLocalInput(value?: Date | string | null) {
   const offset = date.getTimezoneOffset();
   const local = new Date(date.getTime() - offset * 60_000);
   return local.toISOString().slice(0, 16);
-}
-
-const turndown = new TurndownService({
-  headingStyle: "atx",
-  codeBlockStyle: "fenced",
-  bulletListMarker: "-"
-});
-turndown.use(gfm);
-
-function htmlToMarkdown(html: string) {
-  return turndown.turndown(html);
-}
-
-function markdownToHtml(markdown: string) {
-  return marked.parse(markdown, { async: false, gfm: true, breaks: true });
 }
 
 function readStats(editor: Editor) {
@@ -173,7 +157,7 @@ export function PostEditor({ post }: { post?: EditorPost }) {
     status: (post?.status as PostStatus | undefined) ?? "DRAFT",
     visibility: (post?.visibility as Visibility | undefined) ?? "PUBLIC",
     categoryName: post?.category?.name ?? "",
-    tagNames: post?.tags.map(({ tag }) => tag.name).join(", ") ?? "",
+    tagNames: post?.tags.map(({ tag }) => tag.name) ?? [],
     seoTitle: post?.seoTitle ?? "",
     seoDescription: post?.seoDescription ?? "",
     scheduledAt: toLocalInput(post?.scheduledAt)
@@ -296,7 +280,17 @@ export function PostEditor({ post }: { post?: EditorPost }) {
         return;
       }
 
-      setForm(saved.form);
+      // 과거 버전은 tagNames를 콤마 문자열로 저장했으므로 배열로 정규화 (복구 시 .map 크래시 방지)
+      const restoredForm: FormState = {
+        ...saved.form,
+        tagNames: Array.isArray(saved.form.tagNames)
+          ? saved.form.tagNames
+          : String(saved.form.tagNames ?? "")
+              .split(",")
+              .map((tag) => tag.trim())
+              .filter(Boolean)
+      };
+      setForm(restoredForm);
       editor.commands.setContent(saved.contentJson);
       setMessage("자동 저장본을 복구했습니다.");
     } catch {
@@ -473,10 +467,7 @@ export function PostEditor({ post }: { post?: EditorPost }) {
       slug: form.slug || slugify(form.title),
       contentJson: editor.getJSON(),
       contentHtml: editor.getHTML(),
-      tagNames: form.tagNames
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean)
+      tagNames: form.tagNames.map((tag) => tag.trim()).filter(Boolean)
     };
 
     const response = await fetch(post ? `/api/posts/${post.id}` : "/api/posts", {
@@ -811,24 +802,27 @@ export function PostEditor({ post }: { post?: EditorPost }) {
               </div>
             )}
             <div className="p-5">
-              {preview ? (
+              {preview && (
                 <div className="prose-blog min-h-[520px]" dangerouslySetInnerHTML={{ __html: editor?.getHTML() ?? "" }} />
-              ) : htmlMode ? (
+              )}
+              {htmlMode && (
                 <textarea
                   value={htmlDraft}
                   onChange={(event) => setHtmlDraft(event.target.value)}
                   spellCheck={false}
                   className="min-h-[520px] w-full resize-y rounded-md border border-[#d7cec0] bg-[#1e1e1e] p-4 font-mono text-[13px] leading-6 text-[#e6e6e6] outline-none"
                 />
-              ) : markdownMode ? (
+              )}
+              {markdownMode && (
                 <textarea
                   value={mdDraft}
                   onChange={(event) => setMdDraft(event.target.value)}
                   spellCheck={false}
                   className="min-h-[520px] w-full resize-y rounded-md border border-[#d7cec0] bg-[#1e1e1e] p-4 font-mono text-[13px] leading-6 text-[#e6e6e6] outline-none"
                 />
-              ) : (
-                <>
+              )}
+              {/* EditorContent는 언마운트하지 않고 항상 마운트한 채 CSS로만 숨긴다 — ProseMirror가 직접 조작한 DOM을 React가 제거하려다 나는 removeChild 에러 방지 */}
+              <div className={clsx((preview || htmlMode || markdownMode) && "hidden")}>
                   <EditorContent editor={editor} />
                   {editor && (
                     <BubbleMenu
@@ -904,10 +898,29 @@ export function PostEditor({ post }: { post?: EditorPost }) {
                         onChange={(event) => editor.chain().focus().updateAttributes("image", { alt: event.target.value }).run()}
                         className="h-7 w-36 rounded border border-[#d7cec0] bg-white px-2 text-xs text-ink outline-none focus:border-moss"
                       />
+                      <span className="bubble-divider" />
+                      {(["50%", "75%", "100%"] as const).map((w) => (
+                        <button
+                          key={w}
+                          type="button"
+                          title={`너비 ${w}`}
+                          className={bubbleBtnClass(editor.getAttributes("image").width === w)}
+                          onClick={() => editor.chain().focus().updateAttributes("image", { width: w }).run()}
+                        >
+                          {w}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        title="원본 크기"
+                        className={bubbleBtnClass(!editor.getAttributes("image").width)}
+                        onClick={() => editor.chain().focus().updateAttributes("image", { width: null }).run()}
+                      >
+                        원본
+                      </button>
                     </BubbleMenu>
                   )}
-                </>
-              )}
+              </div>
             </div>
           </div>
         </section>
@@ -919,8 +932,8 @@ export function PostEditor({ post }: { post?: EditorPost }) {
             <Field label="URL slug" value={form.slug} onChange={(value) => updateForm("slug", slugify(value))} />
             <CategorySelect value={form.categoryName} onChange={(value) => updateForm("categoryName", value)} />
             <TagInput
-              value={form.tagNames.split(",").map((tag) => tag.trim()).filter(Boolean)}
-              onChange={(tags) => updateForm("tagNames", tags.join(", "))}
+              value={form.tagNames}
+              onChange={(tags) => updateForm("tagNames", tags)}
             />
             <Field label="예약 발행일" type="datetime-local" value={form.scheduledAt} onChange={(value) => updateForm("scheduledAt", value)} />
           </Panel>
@@ -957,70 +970,5 @@ export function PostEditor({ post }: { post?: EditorPost }) {
         </aside>
       </main>
     </form>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-md border border-[#e1d7c8] bg-white p-4 shadow-soft">
-      <h2 className="text-sm font-black text-ink">{title}</h2>
-      <div className="mt-4 space-y-3">{children}</div>
-    </section>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block text-sm font-bold text-[#53606d]">
-      <span>{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="mt-1 h-10 w-full rounded-md border border-[#d7cec0] bg-white px-3 text-sm font-medium text-ink outline-none focus:border-moss"
-      />
-    </label>
-  );
-}
-
-function Select({
-  label,
-  value,
-  onChange,
-  options
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-}) {
-  return (
-    <label className="block text-sm font-bold text-[#53606d]">
-      <span>{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-10 w-full rounded-md border border-[#d7cec0] bg-white px-3 text-sm font-medium text-ink outline-none focus:border-moss"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

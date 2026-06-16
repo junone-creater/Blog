@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PostEditor } from "@/components/PostEditor";
-import { postInclude } from "@/lib/posts";
-import { prisma } from "@/lib/prisma";
+import { getPostForEditor } from "@/lib/posts";
 
 export default async function EditPage({
   params
@@ -10,10 +9,7 @@ export default async function EditPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const post = await prisma.post.findUnique({
-    where: { id },
-    include: postInclude
-  });
+  const post = await getPostForEditor(id);
 
   if (!post) {
     notFound();

@@ -45,17 +45,19 @@ export default function TagInput({ value, onChange, label = "태그" }: TagInput
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const hasTag = (name: string) => value.some((tag) => tag.toLowerCase() === name.toLowerCase());
+
   const filtered = useMemo(() => {
     const query = draft.trim().toLowerCase();
     return suggestions
-      .filter((name) => !value.includes(name))
+      .filter((name) => !value.some((tag) => tag.toLowerCase() === name.toLowerCase()))
       .filter((name) => (query ? name.toLowerCase().includes(query) : true))
       .slice(0, 8);
   }, [suggestions, value, draft]);
 
   function addTag(raw: string) {
     const name = raw.trim();
-    if (!name || value.includes(name)) {
+    if (!name || hasTag(name)) {
       setDraft("");
       return;
     }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { buildCategoryUpsertArgs, buildPostScalarData, buildPostTags } from "@/lib/post-write";
 import { postInclude, uniqueSlug } from "@/lib/posts";
-import { slugify } from "@/lib/slug";
 import { postInputSchema } from "@/lib/validation";
 
 export async function GET(
@@ -48,16 +48,7 @@ export async function PUT(
   const input = parsed.data;
   const slug = await uniqueSlug(input.slug || input.title, id);
   const categoryId = input.categoryName
-    ? (
-        await prisma.category.upsert({
-          where: { slug: slugify(input.categoryName) },
-          update: { name: input.categoryName },
-          create: {
-            name: input.categoryName,
-            slug: slugify(input.categoryName)
-          }
-        })
-      ).id
+    ? (await prisma.category.upsert(buildCategoryUpsertArgs(input.categoryName))).id
     : null;
   const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
   const publishedAt =
@@ -73,33 +64,9 @@ export async function PUT(
     return tx.post.update({
       where: { id },
       data: {
-        title: input.title,
-        subtitle: input.subtitle || null,
-        slug,
-        contentJson: JSON.stringify(input.contentJson),
-        contentHtml: input.contentHtml,
-        excerpt: input.excerpt || null,
-        coverImageUrl: input.coverImageUrl || null,
-        status: input.status,
-        visibility: input.visibility,
+        ...buildPostScalarData(input, { slug, scheduledAt, publishedAt }),
         categoryId,
-        seoTitle: input.seoTitle || null,
-        seoDescription: input.seoDescription || null,
-        scheduledAt,
-        publishedAt,
-        tags: {
-          create: input.tagNames.map((name) => ({
-            tag: {
-              connectOrCreate: {
-                where: { slug: slugify(name) },
-                create: {
-                  name,
-                  slug: slugify(name)
-                }
-              }
-            }
-          }))
-        }
+        tags: buildPostTags(input.tagNames)
       },
       include: postInclude
     });

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { FilePenLine, Plus, Search } from "lucide-react";
-import { Button } from "@/components/Button";
+import { buttonClassName } from "@/components/Button";
 import { SearchBox } from "@/components/SearchBox";
 import { Shell } from "@/components/Shell";
 import { getAllPosts } from "@/lib/posts";
@@ -31,11 +31,9 @@ export default async function AdminPage({
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <SearchBox placeholder="관리 글 검색" />
-            <Link href="/admin/write">
-              <Button variant="primary" className="w-full sm:w-auto">
-                <Plus className="h-4 w-4" />
-                새 글
-              </Button>
+            <Link href="/admin/write" className={buttonClassName("primary", "w-full sm:w-auto")}>
+              <Plus className="h-4 w-4" />
+              새 글
             </Link>
           </div>
         </div>
